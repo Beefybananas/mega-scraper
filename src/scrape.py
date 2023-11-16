@@ -85,7 +85,7 @@ class MEGAsync():
 
         # OS-specific shell call.
         if system() == "Windows":
-            self.OSShell = "Powershell"
+            self.OSShell = "PowerShell"
         else:
             msg = f"Not suppoted for OS: {system()}"
             logging.critical(msg)
@@ -112,14 +112,19 @@ class MEGAsync():
 
         # Log in to the remotepath.
         cmd = [self.OSShell, "mega-login", self.remoteRoot]
-        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        logging.debug(' '.join(cmd))
+        pLogin = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 
-        while not p.poll():
-            logging.error(p.stdout.readline())
+        for line in iter(pLogin.stdout.readline, b''):
+            logging.error(line)
+        pLogin.stdout.close()
+        pLogin.wait()
 
-        subprocess.run(["mega-cd" "/"])
+        cmd = [self.OSShell, "mega-cd", "/"]
+        logging.debug(' '.join(cmd))
+        subprocess.run(cmd)
 
-        return p.returncode
+        return pLogin.returncode
 
     def ls(
         self: Self,
@@ -148,6 +153,7 @@ class MEGAsync():
         nodes = []
         # command: mega-ls -l $remote_path --time-format=ISO6081_WITH_TIME
         cmd = [self.OSShell, "mega-ls", "-l", path, "--time-format=ISO6081_WITH_TIME"]
+        logging.debug(' '.join(cmd))
         p = subprocess.run(cmd, stdout=subprocess.STDOUT)
 
         if p.returncode != 0:
@@ -176,6 +182,7 @@ class MEGAsync():
                 "path": nodePath,
             }
             nodes.append(node)
+            logging.debug(node)
 
         return nodes
 
@@ -251,6 +258,7 @@ class MEGAsync():
                             break
 
                     if isNeeded:
+                        logging.debug(f"Added new folder {node['path']}")
                         self.downloadNodes.append(node)
                         newFolders += 1
 
@@ -326,7 +334,7 @@ class MEGAsync():
         newDownloads = 0
 
         # Prepare files to be replaced.
-        tmpDir = os.path.join(self.localRoot, "tmp")
+        tmpDir = os.path.join(self.localRoot, "_tmp")
         with open(os.path.join(tmpDir, "_replace.log"), 'x') as f:
             for node in self.replaceNodes:
                 logging.debug(f"Replace {node['path']}")
@@ -348,6 +356,7 @@ class MEGAsync():
                 os.path.join(self.remoteRoot, node['path']),
                 os.path.join(self.localRoot, node['path'])
             ]
+            logging.debug(' '.join(cmd))
             p = subprocess.run(cmd, stdout=subprocess.STDOUT)
             if p.stdout:
                 logging.error(p.stdout)
@@ -368,7 +377,8 @@ class MEGAsync():
             Return code of the MEGA-LOGOUT cmdlet process (0 is success).
         """
         cmd = [self.OSShell, "mega-logout"]
-        p = subprocess.run(cmd, stdout=subprocess.STDOUT)
+        logging.debug(' '.join(cmd))
+        p = subprocess.run(cmd)
         if p.returncode:
             logging.critical(p.stdout)
 
@@ -408,6 +418,9 @@ class MEGAsync():
         # Download all missing/old files.
         nNewDownloads = self.queueDownloads()
         logging.debug(f"Started {nNewDownloads} new downloads.")
+
+        logging.info(f"Queued {nNewDownloads} with MEGA-GET.")
+        logging.info("Please use MEGA-TRANSFERS to view the ongoing downloads.")
 
         # Log out of the MEGA-CMD session.
         # self.logout()
@@ -454,6 +467,7 @@ if __name__ == "__main__":
 
     # Run the scraper.
     sync = MEGAsync(folder_url, dest_path)
+    logging.debug(f"Initialized with remotePath: {sync.remoteRoot}; localPath: {sync.localRoot}")
     sync.sync()
 
 """My Default Arguments
