@@ -113,12 +113,12 @@ class MEGAsync():
         # Log in to the remotepath.
         cmd = [self.OSShell, "mega-login", self.remoteRoot]
         logging.debug(' '.join(cmd))
-        pLogin = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        pLogin = subprocess.run(cmd, capture_output=True)
 
-        for line in iter(pLogin.stdout.readline, b''):
-            logging.error(line.decode('utf-8').rstrip('\n'))
-        pLogin.stdout.close()
-        pLogin.wait()
+        if pLogin.stdout:
+            logging.debug(pLogin.stdout.decode('utf-8').strip('\n'))
+        if pLogin.stderr:
+            logging.error(pLogin.stderr.decode('utf-8').strip('\n'))
 
         cmd = [self.OSShell, "mega-cd", "/"]
         logging.debug(' '.join(cmd))
@@ -157,17 +157,18 @@ class MEGAsync():
         # command: mega-ls -l $remote_path --time-format=ISO6081_WITH_TIME
         cmd = [self.OSShell, "mega-ls", "-l", path, "--time-format=ISO6081_WITH_TIME"]
         logging.debug(' '.join(cmd))
-        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        pLS = subprocess.run(cmd, capture_output=True)
 
-        for line in iter(p.stdout.readline, b''):
-            logging.debug(line.decode('utf-8').rstrip('\n'))
-        p.stdout.close()
-        p.wait()
+        logging.debug(pLS.stdout.decode('utf-8').rstrip('\n'))
+        if pLS.stderr:
+            for line in pLS.stderr.decode('utf-8').split('\n'):
+                logging.error(line)
 
-        if p.returncode != 0:
-            raise OSError(errno=p.returncode, filename=path)
+        if pLS.returncode != 0:
+            raise OSError(errno=pLS.returncode, filename=path)
 
-        for line in str(p.stdout).split('\n'):
+        for line in pLS.stdout.decode('utf-8').split('\n')[1:]:
+            logging.debug(f"Processing line: {line}")
             type = line[0]
             export = line[1]
             exportDuration = line[2]
@@ -421,25 +422,30 @@ class MEGAsync():
         bool
             Sucess (or failure) of the sync.
         """
+        logging.info("Logging in.")
         if self.login():
             logging.critical("Failed to log in to MEGA.nz remote path. Please verify the link.")
             return False
 
         # Compute the remote file tree.
+        logging.info("Collecting remote tree.")
         nBadNodes = self.getRemoteTree()
         logging.debug(f"Encountered {nBadNodes} bad remote nodes.")
 
         # Get the list of all the new folders to be downloaded.
+        logging.info("Collecting full folders to be downloaded.")
         nNewFolders = self.getNewFolders()
         logging.debug(f"Queued {nNewFolders} new folders to download.")
 
         # Compare all remote files to their local counterparts.
+        logging.info("Collecting single files to be downloaded.")
         nSyncFiles = self.filesToSync()
         logging.debug("Queued {} new file downloads ({} new, {} updated).".format(
             nSyncFiles, len(self.downloadNodes), len(self.replaceNodes)
         ))
 
         # Download all missing/old files.
+        logging.info("Queueing all downloads.")
         nNewDownloads = self.queueDownloads()
         logging.debug(f"Started {nNewDownloads} new downloads.")
 
