@@ -116,13 +116,16 @@ class MEGAsync():
         pLogin = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 
         for line in iter(pLogin.stdout.readline, b''):
-            logging.error(line)
+            logging.error(line.decode('utf-8').rstrip('\n'))
         pLogin.stdout.close()
         pLogin.wait()
 
         cmd = [self.OSShell, "mega-cd", "/"]
         logging.debug(' '.join(cmd))
-        subprocess.run(cmd)
+        pCD = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
+        if pCD.stdout:
+            logging.error(pCD.stdout.decode('utf-8').rstrip('\n'))
 
         return pLogin.returncode
 
@@ -154,12 +157,17 @@ class MEGAsync():
         # command: mega-ls -l $remote_path --time-format=ISO6081_WITH_TIME
         cmd = [self.OSShell, "mega-ls", "-l", path, "--time-format=ISO6081_WITH_TIME"]
         logging.debug(' '.join(cmd))
-        p = subprocess.run(cmd, stdout=subprocess.STDOUT)
+        p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+
+        for line in iter(p.stdout.readline, b''):
+            logging.debug(line.decode('utf-8').rstrip('\n'))
+        p.stdout.close()
+        p.wait()
 
         if p.returncode != 0:
             raise OSError(errno=p.returncode, filename=path)
 
-        for line in str(p.stdout()).split('\n'):
+        for line in str(p.stdout).split('\n'):
             type = line[0]
             export = line[1]
             exportDuration = line[2]
@@ -208,8 +216,9 @@ class MEGAsync():
             for n, node in enumerate(nodesToCheck):
                 try:
                     newNodes = self.ls(node["path"])
-                except OSError:
+                except OSError as e:
                     logging.error(f"Invalid path at: {node['path']}")
+                    logging.error(e.strerror)
                     nodesToCheck.pop(n)
                     badNodes += 1
                     continue
@@ -335,6 +344,10 @@ class MEGAsync():
 
         # Prepare files to be replaced.
         tmpDir = os.path.join(self.localRoot, "_tmp")
+        if not os.path.exists(tmpDir):
+            logging.debug(f"Created directory {tmpDir}")
+            os.mkdir(tmpDir)
+
         with open(os.path.join(tmpDir, "_replace.log"), 'x') as f:
             for node in self.replaceNodes:
                 logging.debug(f"Replace {node['path']}")
@@ -357,9 +370,11 @@ class MEGAsync():
                 os.path.join(self.localRoot, node['path'])
             ]
             logging.debug(' '.join(cmd))
-            p = subprocess.run(cmd, stdout=subprocess.STDOUT)
+            p = subprocess.run(cmd, capture_output=True)
             if p.stdout:
-                logging.error(p.stdout)
+                logging.error(p.stdout.decode('utf-8').rstrip('\n'))
+            if p.stderr:
+                logging.error(p.stderr.decode('utf-8').rstrip('\n'))
 
             newDownloads += 1
 
@@ -378,11 +393,20 @@ class MEGAsync():
         """
         cmd = [self.OSShell, "mega-logout"]
         logging.debug(' '.join(cmd))
-        p = subprocess.run(cmd)
-        if p.returncode:
-            logging.critical(p.stdout)
+        pLogout = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 
-        return p.returncode
+        for line in iter(pLogout.stdout.readline, b''):
+            logging.info(line.decode('utf-8').rstrip('\n'))
+        pLogout.stdout.close()
+        pLogout.wait()
+
+        if pLogout.returncode:
+            logging.critical(pLogout.stdout.decode('utf-8'))
+            pError = subprocess.run([self.OSShell, "mega-errorcode", pLogout.returncode],
+                                    capture_output=True)
+            logging.critical(pError.stdout.decode('utf-8'))
+
+        return pLogout.returncode
 
     def sync(
         self: Self,
