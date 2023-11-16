@@ -1,2 +1,2 @@
-# mega-scraper
-Scrape a Mega.nz public file (read-only) to get a full file tree.
+# mega-sync
+Sync a Mega.nz public folder (read only) to a local directory without downloading redundant data.
