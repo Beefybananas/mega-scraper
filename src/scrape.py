@@ -159,7 +159,7 @@ class MEGAsync():
         logging.debug(' '.join(cmd))
         pLS = subprocess.run(cmd, capture_output=True)
 
-        logging.debug(pLS.stdout.decode('utf-8').rstrip('\n'))
+        # logging.debug(pLS.stdout.decode('utf-8').rstrip('\n'))
         if pLS.stderr:
             for line in pLS.stderr.decode('utf-8').split('\n'):
                 logging.error(line)
@@ -167,17 +167,27 @@ class MEGAsync():
         if pLS.returncode != 0:
             raise OSError(errno=pLS.returncode, filename=path)
 
-        for line in pLS.stdout.decode('utf-8').split('\n')[1:]:
+        for line in pLS.stdout.decode('utf-8').split('\n')[1:-1]:  # Skip 0 (header) and -1 (b'')
             logging.debug(f"Processing line: {line}")
             type = line[0]
             export = line[1]
             exportDuration = line[2]
             shared = line[3]
-            version = int(line[5:9].lstrip())
-            size = int(line[10:20].lstrip())
+            version = line[5:9].lstrip()
+            size = line[10:20].lstrip()
             date = datetime.datetime.strptime(line[21:40].strip(), "%Y-%m-%dT%H:%M:%S")
             name = line[41:].strip()
             nodePath = os.path.join(path, name).lstrip("/\\")
+
+            # Sanitize input.
+            if version == "-":
+                version = 0
+            else:
+                version = int(version)
+            if size == "-":
+                size = 0
+            else:
+                size = int(size)
 
             node = {
                 "type": type,
@@ -191,7 +201,7 @@ class MEGAsync():
                 "path": nodePath,
             }
             nodes.append(node)
-            logging.debug(node)
+            # logging.debug(node)
 
         return nodes
 
