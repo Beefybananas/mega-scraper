@@ -23,6 +23,7 @@ Compare all files in remote to corresponding local files.
 import re
 import os
 import sys
+import json
 import logging
 import argparse
 import datetime
@@ -187,7 +188,7 @@ class MEGAsync():
             shared = line[3]
             version = line[5:9].lstrip()
             size = line[10:20].lstrip()
-            date = datetime.datetime.strptime(line[21:40].strip(), "%Y-%m-%dT%H:%M:%S")
+            date = datetime.datetime.strptime(line[21:40].strip(), "%Y-%m-%dT%H:%M:%S").timestamp()
             name = line[41:].rstrip()
             nodePath = '/'.join([path, name]).lstrip("/\\")
 
@@ -280,7 +281,7 @@ class MEGAsync():
                     shared = flags[3]
                     version = nodeMatch[2].strip()
                     size = nodeMatch[3].strip()
-                    date = datetime.datetime.strptime(nodeMatch[4], "%Y-%m-%dT%H:%M:%S")
+                    date = datetime.datetime.strptime(nodeMatch[4], "%Y-%m-%dT%H:%M:%S").timestamp()
                     name = nodeMatch[7].rstrip('\r')
                     nodePath = '/'.join([remoteDir, name]).lstrip(r'\/')
 
@@ -438,7 +439,7 @@ class MEGAsync():
         with open(os.path.join(tmpDir, "_replace.log"), 'x') as f:
             for node in self.replaceNodes:
                 logging.debug(f"Replace {node['path']}")
-                f.write(node)
+                f.write(json.dumps(node))
 
                 # # Move the file to the tmp directory pending removal.
                 # oldLocalPath = os.path.join(self.localRoot, node['path'])
@@ -515,26 +516,24 @@ class MEGAsync():
 
         # Compute the remote file tree.
         logging.warning("Collecting remote tree.")
-        nBadNodes = self.getRemoteTree()
-        logging.info(f"Encountered {nBadNodes} bad remote nodes.")
+        nNodes = self.getRemoteTree()
+        logging.info(f"Encountered {nNodes} remote nodes.")
 
         # Get the list of all the new folders to be downloaded.
         logging.warning("Collecting full folders to be downloaded.")
         nNewFolders = self.getNewFolders()
-        logging.info(f"Queued {nNewFolders} new folders to download.")
+        logging.info(f"Need to download {nNewFolders} folders.")
 
         # Compare all remote files to their local counterparts.
         logging.warning("Collecting single files to be downloaded.")
         nSyncFiles = self.filesToSync()
-        logging.info("Queued {} new file downloads ({} new, {} updated).".format(
+        logging.info("Need to download {} files ({} new, {} updated).".format(
             nSyncFiles, len(self.downloadNodes), len(self.replaceNodes)
         ))
 
         # Download all missing/old files.
         logging.warning("Queueing all downloads.")
         nNewDownloads = self.queueDownloads()
-        logging.info(f"Started {nNewDownloads} new downloads.")
-
         logging.warning(f"Queued {nNewDownloads} with MEGA-GET.")
         logging.warning("Please use MEGA-TRANSFERS to view the ongoing downloads.")
 
