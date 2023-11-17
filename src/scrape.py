@@ -20,6 +20,7 @@ Compare all files in remote to corresponding local files.
       (overwrite).
 """
 
+import re
 import os
 import sys
 import logging
@@ -116,16 +117,16 @@ class MEGAsync():
         pLogin = subprocess.run(cmd, capture_output=True)
 
         if pLogin.stdout:
-            logging.debug(pLogin.stdout.decode('utf-8').strip('\n'))
+            logging.debug(pLogin.stdout.decode('utf-8').rstrip())
         if pLogin.stderr:
-            logging.error(pLogin.stderr.decode('utf-8').strip('\n'))
+            logging.error(pLogin.stderr.decode('utf-8').rstrip())
 
         cmd = [self.OSShell, "mega-cd", "/"]
         logging.debug(' '.join(cmd))
         pCD = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 
         if pCD.stdout:
-            logging.error(pCD.stdout.decode('utf-8').rstrip('\n'))
+            logging.error(pCD.stdout.decode('utf-8').rstrip())
 
         return pLogin.returncode
 
@@ -155,20 +156,28 @@ class MEGAsync():
         """
         nodes = []
         # command: mega-ls -l $remote_path --time-format=ISO6081_WITH_TIME
-        cmd = [self.OSShell, "mega-ls", "-l", path, "--time-format=ISO6081_WITH_TIME"]
+        cmd = [self.OSShell, "mega-ls", "-l",
+               ''.join(['"', path, '"']),
+               "--time-format=ISO6081_WITH_TIME"]
         logging.debug(' '.join(cmd))
         pLS = subprocess.run(cmd, capture_output=True)
 
-        # logging.debug(pLS.stdout.decode('utf-8').rstrip('\n'))
+        # logging.debug(pLS.stdout.decode('utf-8').rstrip())
         if pLS.stderr:
-            for line in pLS.stderr.decode('utf-8').split('\n'):
+            for line in pLS.stderr.decode('utf-8').rstrip():
                 logging.error(line)
 
         if pLS.returncode != 0:
-            raise OSError(errno=pLS.returncode, filename=path)
+            logging.error(pLS.stdout.decode('utf-8').rstrip())
 
-        for line in pLS.stdout.decode('utf-8').split('\n')[1:-1]:  # Skip 0 (header) and -1 (b'')
-            logging.debug(f"Processing line: {line}")
+        for line in pLS.stdout.decode('utf-8').split('\n'):
+            # Skip the lines that are not formatted correctly.
+            patternNode = r"^([bdirx-][e-][pt-][is-])( {1,4}[\d-])( {1,10}[\d-]+)"
+            if not re.match(patternNode, line):
+                # logging.debug(f"Skipping line {line.rstrip()}")
+                continue
+
+            # logging.debug(f"Parsing line: {line.rstrip()}")
             type = line[0]
             export = line[1]
             exportDuration = line[2]
@@ -176,8 +185,8 @@ class MEGAsync():
             version = line[5:9].lstrip()
             size = line[10:20].lstrip()
             date = datetime.datetime.strptime(line[21:40].strip(), "%Y-%m-%dT%H:%M:%S")
-            name = line[41:].strip()
-            nodePath = os.path.join(path, name).lstrip("/\\")
+            name = line[41:].rstrip()
+            nodePath = '/'.join([path, name]).lstrip("/\\")
 
             # Sanitize input.
             if version == "-":
@@ -218,32 +227,40 @@ class MEGAsync():
         """
         badNodes = 0
         tree = []
-        nodesToCheck = [{
-            "path": "/", "name": "/", "type": "d", "export": "-", "export_duration": "-",
-            "shared": "-", "version": "-", "size": "-", "date": "-"
-        }]  # Start with the root directory.
+        nodesToCheck = [
+            {
+                "path": "/", "name": "/", "type": "d", "export": "-", "export_duration": "-",
+                "shared": "-", "version": "-", "size": "-", "date": "-"
+            },
+        ]  # Start with the root directory.
 
         while nodesToCheck:
-            for n, node in enumerate(nodesToCheck):
+            toPop = []
+            for n, nodeCheck in enumerate(nodesToCheck):
+                # print(';'.join([node['path'] for node in nodesToCheck]))
+                # logging.debug(f"Checking node: {node['path']}")
                 try:
-                    newNodes = self.ls(node["path"])
+                    newNodes = self.ls(nodeCheck['path'])
                 except OSError as e:
-                    logging.error(f"Invalid path at: {node['path']}")
+                    logging.error(f"Invalid path at: {nodeCheck['path']}")
                     logging.error(e.strerror)
-                    nodesToCheck.pop(n)
+                    toPop.append(n)
                     badNodes += 1
                     continue
 
-                for node in newNodes:
-                    if node["type"] == "d":  # Folder
-                        nodesToCheck.extend(node)
-                        tree.extend(node)
-                    elif node["type"] == "-":  # File
-                        tree.extend(node)
+                for m, nodeNew in enumerate(newNodes):
+                    if nodeNew['type'] == "d":  # Folder
+                        # logging.debug(f"Added node: {node['path']}")
+                        nodesToCheck.insert(n+m+1, nodeNew)
+                        tree.append(nodeNew)
+                    elif nodeNew['type'] == "-":  # File
+                        tree.append(nodeNew)
                     else:  # root, inbox, rubbish, or unsupported
-                        msg = str(f"The node {node['path']} (type {node['type']})"
+                        msg = str(f"The node (type {nodeNew['type']}) {nodeNew['path']}"
                                   + " is not a file or folder, ignoring.")
                         logging.info(msg)
+                toPop.append(n)
+            for n in toPop.sort(reverse=True):
                 nodesToCheck.pop(n)
 
         # Make the tree accessible to the rest of the object.
@@ -383,9 +400,9 @@ class MEGAsync():
             logging.debug(' '.join(cmd))
             p = subprocess.run(cmd, capture_output=True)
             if p.stdout:
-                logging.error(p.stdout.decode('utf-8').rstrip('\n'))
+                logging.error(p.stdout.decode('utf-8').rstrip())
             if p.stderr:
-                logging.error(p.stderr.decode('utf-8').rstrip('\n'))
+                logging.error(p.stderr.decode('utf-8').rstrip())
 
             newDownloads += 1
 
@@ -407,7 +424,7 @@ class MEGAsync():
         pLogout = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
 
         for line in iter(pLogout.stdout.readline, b''):
-            logging.info(line.decode('utf-8').rstrip('\n'))
+            logging.info(line.decode('utf-8').rstrip())
         pLogout.stdout.close()
         pLogout.wait()
 
@@ -508,7 +525,11 @@ if __name__ == "__main__":
     # Run the scraper.
     sync = MEGAsync(folder_url, dest_path)
     logging.debug(f"Initialized with remotePath: {sync.remoteRoot}; localPath: {sync.localRoot}")
-    sync.sync()
+    try:
+        sync.sync()
+    except Exception as e:
+        logging.critical(e)
+        raise e
 
 """My Default Arguments
 python3 .\src\scrape.py -r "https://mega.nz/folder/soFQjR7B#18lj20ndYSjFzmBAIVdCaA" -l "D:\3D Printing\Games\Dungeons and Dragons\Minis\MZ4250 3D Miniatures Models" -v # noqa
