@@ -603,5 +603,5 @@ if __name__ == "__main__":
         raise e
 
 """My Default Arguments
-python3 .\src\scrape.py -r "https://mega.nz/folder/soFQjR7B#18lj20ndYSjFzmBAIVdCaA" -l "D:\3D Printing\Games\Dungeons and Dragons\Minis\MZ4250 3D Miniatures Models" -v # noqa
+python3 .\src\sync.py -r "https://mega.nz/folder/soFQjR7B#18lj20ndYSjFzmBAIVdCaA" -l "D:\3D Printing\Games\Dungeons and Dragons\Minis\MZ4250 3D Miniatures Models" -v # noqa
 """
