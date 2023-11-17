@@ -283,7 +283,7 @@ class MEGAsync():
                     size = nodeMatch[3].strip()
                     date = datetime.datetime.strptime(nodeMatch[4], "%Y-%m-%dT%H:%M:%S").timestamp()
                     name = nodeMatch[7].rstrip('\r')
-                    nodePath = '/'.join([remoteDir, name]).lstrip(r'\/')
+                    nodePath = '/'.join([remoteDir, name]).strip(r'\/')
 
                     # Sanitize input.
                     if version == "-":
@@ -372,14 +372,6 @@ class MEGAsync():
         int
             Number of files that need to be synced.
         """
-
-        """Logic:
-        If the remote file is not present at the local location, add to download queue.
-        Else
-            If the remote file size is different, add to the replace queue.
-            If the remote file modify date is newer than the local file, add to the replace queue.
-        """
-
         nSyncFiles = 0
 
         for node in self.tree:
@@ -436,26 +428,31 @@ class MEGAsync():
             logging.debug(f"Created directory {tmpDir}")
             os.mkdir(tmpDir)
 
-        with open(os.path.join(tmpDir, "_replace.log"), 'x') as f:
+        with open(os.path.join(tmpDir, "_replace.log"), 'w') as f:
             for node in self.replaceNodes:
                 logging.debug(f"Replace {node['path']}")
-                f.write(json.dumps(node))
+                f.write(''.join([json.dumps(node), '\n']))
 
                 # # Move the file to the tmp directory pending removal.
-                # oldLocalPath = os.path.join(self.localRoot, node['path'])
-                # newLocalPath = os.path.join(tmpDir, node['path'])
-                # os.makedirs(os.path.dirname(newLocalPath), exist_ok=True)
-                # os.rename(oldLocalPath, newLocalPath)
+                oldLocalPath = os.path.join(self.localRoot, node['path'])
+                newLocalPath = os.path.join(tmpDir, node['path'])
+                os.makedirs(os.path.dirname(newLocalPath), exist_ok=True)
+                os.rename(oldLocalPath, newLocalPath)
 
                 # # Add to the download queue
-                # self.downloadNodes.append(node)
+                self.downloadNodes.append(node)
+            logging.info(f"Added {len(self.replaceNodes)} nodes to downloadNodes list.")
 
         # Add new nodes to the download queue.
         for node in self.downloadNodes:
             cmd = [
                 self.OSShell, "mega-get", "-q",
-                os.path.join(self.remoteRoot, node['path']),
-                os.path.join(self.localRoot, node['path'])
+                ''.join(['"', node['path'], '"']),
+                ''.join([
+                    '"',
+                    os.path.join(self.localRoot, os.path.dirname(node['path'])).rstrip(r'\/'),
+                    '"']),
+                "--ignore-quota-warn",
             ]
             logging.debug(' '.join(cmd))
             p = subprocess.run(cmd, capture_output=True)
@@ -463,6 +460,11 @@ class MEGAsync():
                 logging.error(p.stdout.decode('utf-8').rstrip())
             if p.stderr:
                 logging.error(p.stderr.decode('utf-8').rstrip())
+            if p.returncode:
+                codeMeaning = (subprocess.run(["mega-errorcode", p.returncode], capture_output=True)
+                               .stdout.decode('utf-8').strip())
+                logging.error(f"MEGA-GET failed with error code {p.returncode}: {codeMeaning}")
+                continue
 
             newDownloads += 1
 
@@ -534,11 +536,10 @@ class MEGAsync():
         # Download all missing/old files.
         logging.warning("Queueing all downloads.")
         nNewDownloads = self.queueDownloads()
-        logging.warning(f"Queued {nNewDownloads} with MEGA-GET.")
-        logging.warning("Please use MEGA-TRANSFERS to view the ongoing downloads.")
 
-        # Log out of the MEGA-CMD session.
-        # self.logout()
+        if nNewDownloads:
+            logging.warning(f"Queued {nNewDownloads} with MEGA-GET.")
+            logging.warning("Please use MEGA-TRANSFERS to view the ongoing downloads.")
 
         return True
 
