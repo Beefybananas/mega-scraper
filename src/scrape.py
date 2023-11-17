@@ -92,7 +92,7 @@ class MEGAsync():
             logging.critical(msg)
             raise NotImplementedError(msg)
 
-        self.remoteTree = []
+        self.tree = []
         self.downloadNodes = []
         self.replaceNodes = []
 
@@ -108,10 +108,12 @@ class MEGAsync():
             Return code of the MEGA-LOGIN cmdlet (0 is success).
         """
         # Log out (in case we are already logged in to MEGA).
+        logging.info("Running initial log-out.")
         if self.logout():
             raise Exception("MEGA-LOGOUT failed")
 
         # Log in to the remotepath.
+        logging.info("Logging in to remote path.")
         cmd = [self.OSShell, "mega-login", self.remoteRoot]
         logging.debug(' '.join(cmd))
         pLogin = subprocess.run(cmd, capture_output=True)
@@ -226,17 +228,16 @@ class MEGAsync():
             Number of bad nodes found.
         """
         badNodes = 0
-        tree = []
-        nodesToCheck = [
+        self.remoteNodesToCheck = [
             {
                 "path": "/", "name": "/", "type": "d", "export": "-", "export_duration": "-",
                 "shared": "-", "version": "-", "size": "-", "date": "-"
             },
         ]  # Start with the root directory.
 
-        while nodesToCheck:
-            toPop = []
-            for n, nodeCheck in enumerate(nodesToCheck):
+        while self.remoteNodesToCheck:
+            self.remoteNodeIndexToPop = []
+            for n, nodeCheck in enumerate(self.remoteNodesToCheck):
                 # print(';'.join([node['path'] for node in nodesToCheck]))
                 # logging.debug(f"Checking node: {node['path']}")
                 try:
@@ -244,27 +245,27 @@ class MEGAsync():
                 except OSError as e:
                     logging.error(f"Invalid path at: {nodeCheck['path']}")
                     logging.error(e.strerror)
-                    toPop.append(n)
+                    self.remoteNodeIndexToPop.append(n)
                     badNodes += 1
                     continue
 
                 for m, nodeNew in enumerate(newNodes):
                     if nodeNew['type'] == "d":  # Folder
                         # logging.debug(f"Added node: {node['path']}")
-                        nodesToCheck.insert(n+m+1, nodeNew)
-                        tree.append(nodeNew)
+                        self.remoteNodesToCheck.insert(n+m+1, nodeNew)
+                        self.tree.append(nodeNew)
                     elif nodeNew['type'] == "-":  # File
-                        tree.append(nodeNew)
+                        self.tree.append(nodeNew)
                     else:  # root, inbox, rubbish, or unsupported
                         msg = str(f"The node (type {nodeNew['type']}) {nodeNew['path']}"
                                   + " is not a file or folder, ignoring.")
                         logging.info(msg)
-                toPop.append(n)
-            for n in toPop.sort(reverse=True):
-                nodesToCheck.pop(n)
+                self.remoteNodeIndexToPop.append(n)
+            for n in self.remoteNodeIndexToPop.sort(reverse=True):
+                self.remoteNodesToCheck.pop(n)
 
         # Make the tree accessible to the rest of the object.
-        self.remoteTree = sorted(tree, key=lambda n: n["path"])
+        self.tree = sorted(self.tree, key=lambda n: n["path"])
 
         return badNodes
 
@@ -282,7 +283,7 @@ class MEGAsync():
         newFolders = 0
 
         # Check all the nodes in the tree to see if there are any missing from the local.
-        for node in self.remoteTree:
+        for node in self.tree:
             if node['type'] == 'd':  # Only check folders.
                 localNodePath = os.path.join(self.localRoot, node['path'])
                 if not os.path.exists(localNodePath):
@@ -322,7 +323,7 @@ class MEGAsync():
 
         nSyncFiles = 0
 
-        for node in self.remoteTree:
+        for node in self.tree:
             if node['type'] == '-':  # File
                 localPath = os.path.join(self.localRoot, node['path'])
                 localDir = os.path.dirname(localPath)
