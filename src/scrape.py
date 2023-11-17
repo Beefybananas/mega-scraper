@@ -86,6 +86,7 @@ class MEGAsync():
 
         # OS-specific shell call.
         if system() == "Windows":
+            logging.debug("Running Windows; Shell: PowerShell")
             self.OSShell = "PowerShell"
         else:
             msg = f"Not suppoted for OS: {system()}"
@@ -176,10 +177,10 @@ class MEGAsync():
             # Skip the lines that are not formatted correctly.
             patternNode = r"^([bdirx-][e-][pt-][is-])( {1,4}[\d-])( {1,10}[\d-]+)"
             if not re.match(patternNode, line):
-                # logging.debug(f"Skipping line {line.rstrip()}")
+                logging.debug(f"Skipping line {line.rstrip()}")
                 continue
 
-            # logging.debug(f"Parsing line: {line.rstrip()}")
+            logging.debug(f"Parsing line: {line.rstrip()}")
             type = line[0]
             export = line[1]
             exportDuration = line[2]
@@ -211,8 +212,101 @@ class MEGAsync():
                 "name": name,
                 "path": nodePath,
             }
+            logging.debug(node)
             nodes.append(node)
-            # logging.debug(node)
+
+        return nodes
+
+    def lsRecursive(
+        self: Self,
+        path: str,
+    ) -> List[Dict[str, str]]:
+        """
+        lsRecursive Run the mega-ls command for the given node with the recursive flag enabled.
+
+        Parameters
+        ----------
+        path : str
+            Path to the desired directory relative to the remote URL provided.
+            Note: The value '/' is the remoteRoot directory itself.
+
+        Returns
+        -------
+        List[Dict[str, str]]
+            All nodes present within the path.
+        """
+        nodes = []
+        remoteDir = ""  # Path of the current remote node relative to the remotePath supplied.
+        # command: mega-ls -lr $remote_path --time-format=ISO6081_WITH_TIME
+        cmd = [self.OSShell, "mega-ls", "-lr",
+               ''.join(['"', path, '"']), "--time-format=ISO6081_WITH_TIME"]
+        logging.debug(' '.join(cmd))
+        pLS = subprocess.run(cmd, capture_output=True)
+
+        if pLS.stderr:
+            for line in pLS.stderr.decode('utf-8').rstrip():
+                logging.error(line)
+        if pLS.returncode != 0:
+            logging.error(pLS.stdout.decode('utf-8').rstrip())
+
+        folderPattern = ''.join([
+            r"((?<=^\/).*?(?=[\/(:)]))",  # Base folder (redundant; name of the remoteRoot)
+            r"\/?",  # First slash in the path, marking the end of the root name.
+            r"((?!=\/).*(?=:))",  # Relative path to the remoteRoot provided (folder path).
+        ])
+        nodePattern = ' '.join([
+            r"^([bdirx-][e-][pt-][is-])",  # Flags
+            r"( {0,3}[\d-])",  # Version
+            r"( {0,9}[\d-]+)",  # Size
+            r"(\d{4}(-\d{2}){2}T\d{2}(:\d{2}){2})",  # Date
+            r"(.*)",  # Name
+        ])
+
+        for line in pLS.stdout.decode('utf-8').split('\n'):
+            folderMatch = re.search(folderPattern, line)
+            if folderMatch:
+                # Start of a new remote directory.
+                remoteDir = folderMatch[2]
+                logging.debug(f"Parsing directory: {remoteDir}")
+            else:
+                nodeMatch = re.search(nodePattern, line)
+                if nodeMatch:
+                    # Add a new node to the list with the current remoteDir.
+                    # Parse the line of text from the output.
+                    flags = nodeMatch[1]
+                    type = flags[0]
+                    export = flags[1]
+                    exportDuration = flags[2]
+                    shared = flags[3]
+                    version = nodeMatch[2].strip()
+                    size = nodeMatch[3].strip()
+                    date = datetime.datetime.strptime(nodeMatch[4], "%Y-%m-%dT%H:%M:%S")
+                    name = nodeMatch[7].rstrip('\r')
+                    nodePath = '/'.join([remoteDir, name]).lstrip(r'\/')
+
+                    # Sanitize input.
+                    if version == "-":
+                        version = 0
+                    else:
+                        version = int(version)
+                    if size == "-":
+                        size = 0
+                    else:
+                        size = int(size)
+
+                    node = {
+                        "type": type,
+                        "export": export,
+                        "export_duration": exportDuration,
+                        "shared": shared,
+                        "version": version,
+                        "size": size,
+                        "date": date,
+                        "name": name,
+                        "path": nodePath,
+                    }
+                    logging.debug(f"Parsing node: {node['path']}")
+                    nodes.append(node)
 
         return nodes
 
@@ -225,49 +319,13 @@ class MEGAsync():
         Returns
         -------
         int
-            Number of bad nodes found.
+            Number of nodes found.
         """
-        badNodes = 0
-        self.remoteNodesToCheck = [
-            {
-                "path": "/", "name": "/", "type": "d", "export": "-", "export_duration": "-",
-                "shared": "-", "version": "-", "size": "-", "date": "-"
-            },
-        ]  # Start with the root directory.
+        # Parse the output of a single call of "mega-ls -lr / --time-format=ISO6081_WITH_TIME".
+        nodes = self.lsRecursive('/')
+        self.tree = sorted(nodes, key=lambda n: n['path'])
 
-        while self.remoteNodesToCheck:
-            self.remoteNodeIndexToPop = []
-            for n, nodeCheck in enumerate(self.remoteNodesToCheck):
-                # print(';'.join([node['path'] for node in nodesToCheck]))
-                # logging.debug(f"Checking node: {node['path']}")
-                try:
-                    newNodes = self.ls(nodeCheck['path'])
-                except OSError as e:
-                    logging.error(f"Invalid path at: {nodeCheck['path']}")
-                    logging.error(e.strerror)
-                    self.remoteNodeIndexToPop.append(n)
-                    badNodes += 1
-                    continue
-
-                for m, nodeNew in enumerate(newNodes):
-                    if nodeNew['type'] == "d":  # Folder
-                        # logging.debug(f"Added node: {node['path']}")
-                        self.remoteNodesToCheck.insert(n+m+1, nodeNew)
-                        self.tree.append(nodeNew)
-                    elif nodeNew['type'] == "-":  # File
-                        self.tree.append(nodeNew)
-                    else:  # root, inbox, rubbish, or unsupported
-                        msg = str(f"The node (type {nodeNew['type']}) {nodeNew['path']}"
-                                  + " is not a file or folder, ignoring.")
-                        logging.info(msg)
-                self.remoteNodeIndexToPop.append(n)
-            for n in self.remoteNodeIndexToPop.sort(reverse=True):
-                self.remoteNodesToCheck.pop(n)
-
-        # Make the tree accessible to the rest of the object.
-        self.tree = sorted(self.tree, key=lambda n: n["path"])
-
-        return badNodes
+        return len(self.tree)
 
     def getNewFolders(
         self: Self
@@ -450,35 +508,35 @@ class MEGAsync():
         bool
             Sucess (or failure) of the sync.
         """
-        logging.info("Logging in.")
+        logging.warning("Logging in.")
         if self.login():
             logging.critical("Failed to log in to MEGA.nz remote path. Please verify the link.")
             return False
 
         # Compute the remote file tree.
-        logging.info("Collecting remote tree.")
+        logging.warning("Collecting remote tree.")
         nBadNodes = self.getRemoteTree()
-        logging.debug(f"Encountered {nBadNodes} bad remote nodes.")
+        logging.info(f"Encountered {nBadNodes} bad remote nodes.")
 
         # Get the list of all the new folders to be downloaded.
-        logging.info("Collecting full folders to be downloaded.")
+        logging.warning("Collecting full folders to be downloaded.")
         nNewFolders = self.getNewFolders()
-        logging.debug(f"Queued {nNewFolders} new folders to download.")
+        logging.info(f"Queued {nNewFolders} new folders to download.")
 
         # Compare all remote files to their local counterparts.
-        logging.info("Collecting single files to be downloaded.")
+        logging.warning("Collecting single files to be downloaded.")
         nSyncFiles = self.filesToSync()
-        logging.debug("Queued {} new file downloads ({} new, {} updated).".format(
+        logging.info("Queued {} new file downloads ({} new, {} updated).".format(
             nSyncFiles, len(self.downloadNodes), len(self.replaceNodes)
         ))
 
         # Download all missing/old files.
-        logging.info("Queueing all downloads.")
+        logging.warning("Queueing all downloads.")
         nNewDownloads = self.queueDownloads()
-        logging.debug(f"Started {nNewDownloads} new downloads.")
+        logging.info(f"Started {nNewDownloads} new downloads.")
 
-        logging.info(f"Queued {nNewDownloads} with MEGA-GET.")
-        logging.info("Please use MEGA-TRANSFERS to view the ongoing downloads.")
+        logging.warning(f"Queued {nNewDownloads} with MEGA-GET.")
+        logging.warning("Please use MEGA-TRANSFERS to view the ongoing downloads.")
 
         # Log out of the MEGA-CMD session.
         # self.logout()
@@ -501,7 +559,7 @@ if __name__ == "__main__":
         default=r"D:\3D Printing\Games\Dungeons and Dragons\Minis\MZ4250 3D Miniatures Models"
         )
     parser.add_argument(
-        '-v', '--verbose', action='store_true', help="Expanded console logging",
+        '-v', '--verbose', action='count', help="Expanded console logging", default=0
     )
     args = parser.parse_args()
     folder_url = args.remote
@@ -509,12 +567,24 @@ if __name__ == "__main__":
     verbose = args.verbose
 
     # Start logging.
-    streamLevel = logging.CRITICAL
-    if verbose:
+    if verbose == 0:
+        fileLevel = logging.ERROR
+        streamLevel = logging.CRITICAL
+    elif verbose == 1:
+        fileLevel = logging.WARNING
+        streamLevel = logging.ERROR
+    elif verbose == 2:
+        fileLevel = logging.INFO
+        streamLevel = logging.WARNING
+    elif verbose == 3:
+        fileLevel = logging.DEBUG
+        streamLevel = logging.INFO
+    else:
+        fileLevel = logging.DEBUG
         streamLevel = logging.DEBUG
     logger = DualLogger(
         filename=f"log/{datetime.datetime.now().strftime('%Y-%m-%dT%H-%M-%S')}.log",
-        fileLevel=logging.DEBUG,
+        fileLevel=fileLevel,
         stream=sys.stderr,
         streamLevel=streamLevel,
     )
@@ -525,7 +595,7 @@ if __name__ == "__main__":
 
     # Run the scraper.
     sync = MEGAsync(folder_url, dest_path)
-    logging.debug(f"Initialized with remotePath: {sync.remoteRoot}; localPath: {sync.localRoot}")
+    logging.info(f"Initialized with remotePath: {sync.remoteRoot}; localPath: {sync.localRoot}")
     try:
         sync.sync()
     except Exception as e:
