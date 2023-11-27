@@ -430,20 +430,18 @@ class MEGAsync():
 
         with open(os.path.join(tmpDir, "_replace.log"), 'w') as f:
             for node in self.replaceNodes:
+                # Record nodes that are being replaced.
                 logging.debug(f"Replace {node['path']}")
                 f.write(''.join([json.dumps(node), '\n']))
 
-                # # Move the file to the tmp directory pending removal.
-                oldLocalPath = os.path.join(self.localRoot, node['path'])
-                newLocalPath = os.path.join(tmpDir, node['path'])
-                os.makedirs(os.path.dirname(newLocalPath), exist_ok=True)
-                os.rename(oldLocalPath, newLocalPath)
+                # Delete obsolete files.
+                os.remove(os.path.join(self.localRoot, node['path']))
 
-                # # Add to the download queue
+                # Add to the download queue.
                 self.downloadNodes.append(node)
             logging.info(f"Added {len(self.replaceNodes)} nodes to downloadNodes list.")
 
-        # Add new nodes to the download queue.
+        # Add new nodes to the MEGA download queue.
         for node in self.downloadNodes:
             cmd = [
                 self.OSShell, "mega-get", "-q",
@@ -582,8 +580,12 @@ if __name__ == "__main__":
     else:
         fileLevel = logging.DEBUG
         streamLevel = logging.DEBUG
+
+    logFile = os.path.join(os.path.basename(os.path.basename(__file__)), "log",
+                           f"{datetime.datetime.now().strftime('%Y-%m-%dT%H-%M-%S')}.log")
+
     logger = DualLogger(
-        filename=f"log/{datetime.datetime.now().strftime('%Y-%m-%dT%H-%M-%S')}.log",
+        filename=logFile,
         fileLevel=fileLevel,
         stream=sys.stderr,
         streamLevel=streamLevel,
