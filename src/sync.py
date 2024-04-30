@@ -306,7 +306,7 @@ class MEGAsync():
                         "name": name,
                         "path": nodePath,
                     }
-                    logging.debug(f"Parsing node: {node['path']}")
+                    logging.debug(f"Parsing node: \"{node['path']}\"")
                     nodes.append(node)
 
         return nodes
@@ -355,7 +355,7 @@ class MEGAsync():
                             break
 
                     if isNeeded:
-                        logging.debug(f"Added new folder {node['path']}")
+                        logging.debug(f"Added new folder \"{node['path']}\"")
                         self.downloadNodes.append(node)
                         newFolders += 1
 
@@ -383,7 +383,7 @@ class MEGAsync():
                 # in the getNewFolders method.
                 if os.path.exists(localDir):
                     if not os.path.exists(localPath):
-                        logging.debug(f"New download {node['path']}")
+                        logging.debug(f"New download: \"{node['path']}\"")
                         self.downloadNodes.append(node)
                         nSyncFiles += 1
 
@@ -392,7 +392,7 @@ class MEGAsync():
                         isRemoteNewer = (os.stat(localPath).st_mtime < node['date'])
 
                         if (not isSameSize) or isRemoteNewer:
-                            logging.debug(f"Replace {node['path']}")
+                            logging.debug(f"Replace: \"{node['path']}\"")
                             self.replaceNodes.append(node)
                             nSyncFiles += 1
 
@@ -414,7 +414,6 @@ class MEGAsync():
         Handle files to be replaced.
             Move the old files to a temporary directory (retain relative directory structure),
               pending removal.
-            DO NOT ADD THE REPLACEMENT FILES TO THE QUEUE UNTIL DEBUGGING IS COMPLETE
         Add new files to the MEGA-GET download queue.
           (mega-get -q $remotepath $localpath)
         Add new folders to the MEGA-GET download queue.
@@ -527,8 +526,8 @@ class MEGAsync():
         # Compare all remote files to their local counterparts.
         logging.warning("Collecting single files to be downloaded.")
         nSyncFiles = self.filesToSync()
-        logging.info("Need to download {} files ({} new, {} updated).".format(
-            nSyncFiles, len(self.downloadNodes), len(self.replaceNodes)
+        logging.info("Need to download {} single files ({} new, {} updated).".format(
+            nSyncFiles, len(self.downloadNodes) - nNewFolders, len(self.replaceNodes)
         ))
 
         # Download all missing/old files.

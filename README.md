@@ -12,3 +12,5 @@ Where `remoteURL` is the `exportedLink#key` or `remotePath` from MEGA, and `loca
 To run the sync, simply call the `sync` method as follows:
 
 >>> sync.sync()
+
+## Known Issues ##
