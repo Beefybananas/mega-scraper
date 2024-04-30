@@ -581,8 +581,11 @@ if __name__ == "__main__":
         fileLevel = logging.DEBUG
         streamLevel = logging.DEBUG
 
-    logFile = os.path.join(os.path.basename(os.path.basename(__file__)), "log",
-                           f"{datetime.datetime.now().strftime('%Y-%m-%dT%H-%M-%S')}.log")
+    logFile = os.path.join(
+        os.path.dirname(os.path.dirname(__file__)),
+        "log",
+        f"{datetime.datetime.now().strftime('%Y-%m-%dT%H-%M-%S')}.log"
+    )
 
     logger = DualLogger(
         filename=logFile,
